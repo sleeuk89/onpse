@@ -34,7 +34,7 @@ def setup_nltk():
         st.error(f"Error setting up NLTK: {str(e)}")
         return False
 
-class SEOAnalyzer:
+class ContentOptimizer:
     def __init__(self):
         # Basic tokenization without relying on NLTK initially
         self.stop_words = set(['a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 
@@ -47,85 +47,57 @@ class SEOAnalyzer:
         text = re.sub(r'[^\w\s]', '', text.lower())
         # Split into words
         return text.split()
+
+    def analyze_competitor_content(self, content):
+        """ Analyze competitor content based on structure, tone, depth, and keywords """
+        # Return a structured analysis
+        analysis = {
+            'headings': self.extract_headings(content),
+            'tone': self.analyze_tone(content),
+            'depth': self.analyze_depth(content),
+            'keyword_relevance': self.analyze_keywords(content)
+        }
+        return analysis
     
-    def analyze_competitor_content(self, urls):
-        all_text = []
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        
-        with st.spinner('Analyzing competitor content...'):
-            for url in urls:
-                try:
-                    response = requests.get(url, headers=headers, timeout=5)
-                    soup = BeautifulSoup(response.text, 'html.parser')
-                    text = ' '.join([p.text for p in soup.find_all('p')])
-                    all_text.append(text)
-                except Exception as e:
-                    st.warning(f"Couldn't analyze {url}: {str(e)}")
-                    continue
-            
-            if not all_text:
-                return [], []
-                
-            try:
-                vectorizer = TfidfVectorizer(
-                    max_features=50,
-                    stop_words='english',
-                    ngram_range=(1, 2)
-                )
-                tfidf_matrix = vectorizer.fit_transform(all_text)
-                feature_names = vectorizer.get_feature_names_out()
-                return feature_names, all_text
-            except Exception as e:
-                st.error(f"Error in keyword extraction: {str(e)}")
-                return [], all_text
+    def extract_headings(self, content):
+        """ Extract and analyze headings and subheadings """
+        headings = re.findall(r'(^|\n)[#]{1,6}\s*(.*?)\s*(?=\n|$)', content)
+        return headings
     
-    def calculate_content_score(self, content):
-        score_breakdown = {
-            'length': 0,
-            'readability': 0,
-            'keyword_density': 0
+    def analyze_tone(self, content):
+        """ Simple tone analysis based on keyword matching """
+        tone_keywords = {
+            'professional': ['research', 'analysis', 'methodology'],
+            'conversational': ['you', 'we', 'let\'s', 'try'],
+            'promotional': ['buy', 'discount', 'offers']
         }
         
-        # Tokenize text
-        words = self.tokenize_text(content)
+        tone_scores = {'professional': 0, 'conversational': 0, 'promotional': 0}
         
-        # Length score (30 points max)
-        if len(words) >= 1000:
-            score_breakdown['length'] = 30
-        elif len(words) >= 500:
-            score_breakdown['length'] = 20
-        else:
-            score_breakdown['length'] = 10
+        for tone, keywords in tone_keywords.items():
+            tone_scores[tone] = sum([content.lower().count(keyword) for keyword in keywords])
         
-        # Readability score (40 points max)
+        # Determine dominant tone
+        dominant_tone = max(tone_scores, key=tone_scores.get)
+        return dominant_tone
+    
+    def analyze_depth(self, content):
+        """ Measure content depth based on sentence length and complexity """
         sentences = [s.strip() for s in content.split('.') if s.strip()]
-        avg_sentence_length = len(words) / len(sentences) if sentences else 0
-        if avg_sentence_length <= 20:
-            score_breakdown['readability'] = 40
-        elif avg_sentence_length <= 25:
-            score_breakdown['readability'] = 30
+        avg_sentence_length = sum(len(s.split()) for s in sentences) / len(sentences)
+        if avg_sentence_length > 20:
+            return "High"
+        elif avg_sentence_length > 10:
+            return "Medium"
         else:
-            score_breakdown['readability'] = 20
-        
-        # Keyword density score (30 points max)
-        word_freq = Counter(words)
-        total_words = len(words)
-        
-        # Remove stop words from frequency count
-        word_freq = Counter({word: count for word, count in word_freq.items() 
-                           if word not in self.stop_words and len(word) > 2})
-        
-        # Calculate keyword density
-        keyword_densities = {word: (count/total_words)*100 
-                           for word, count in word_freq.most_common(10)}
-        
-        # Score based on keyword density (ideal: 1-3%)
-        good_density_keywords = sum(1 for density in keyword_densities.values() 
-                                 if 1 <= density <= 3)
-        score_breakdown['keyword_density'] = min(30, good_density_keywords * 3)
-        
-        return sum(score_breakdown.values()), score_breakdown, dict(word_freq.most_common(10))
+            return "Low"
 
+    def analyze_keywords(self, content):
+        """ Check keyword usage and integration """
+        keywords = ['qualifying r&d expenditure', 'tax relief', 'government incentives']  # Example keywords
+        keyword_count = {keyword: content.lower().count(keyword) for keyword in keywords}
+        return keyword_count
+    
     def get_semantic_keywords(self, text):
         """ Generate related words using synonyms from WordNet """
         words = self.tokenize_text(text)
@@ -167,62 +139,56 @@ class SEOAnalyzer:
             return []
 
 def main():
-    st.set_page_config(page_title="SEO Content Analyzer", layout="wide")
+    st.set_page_config(page_title="Content Analysis & Optimization", layout="wide")
     
-    st.title("SEO Content Analyzer")
+    st.title("Content Analysis & Optimization Tool for Featured Snippet Success")
     
     # Initialize NLTK (but don't block if it fails)
     setup_nltk()
     
     # Initialize analyzer
-    analyzer = SEOAnalyzer()
+    optimizer = ContentOptimizer()
     
-    # Create two columns
+    # Create two columns for competitor and user content
     col1, col2 = st.columns([6, 4])
     
     with col1:
-        st.subheader("Content Editor")
-        content = st.text_area("Enter your content here:", height=300)
+        st.subheader("Competitor Content (Featured Snippet Holder)")
+        competitor_content = st.text_area("Enter the competitor's content here:", height=400)
         
-        target_keywords = st.text_input("Enter target keywords (comma-separated):")
+        st.subheader("User Content (Your Content)")
+        user_content = st.text_area("Enter your content here:", height=400)
+        
+        target_keyword = st.text_input("Enter target keyword:")
         analyze_button = st.button("Analyze Content")
         
     with col2:
         st.subheader("Analysis Results")
         
-        if analyze_button and content:
+        if analyze_button and competitor_content and user_content:
             try:
-                # Calculate content scores
-                score, score_breakdown, keyword_freq = analyzer.calculate_content_score(content)
+                # Analyze competitor content
+                competitor_analysis = optimizer.analyze_competitor_content(competitor_content)
                 
-                # Display score with gauge chart
-                fig = px.pie(values=[score, 100-score], 
-                            names=['Score', 'Remaining'],
-                            hole=0.7,
-                            color_discrete_sequence=['#00CC96', '#EFF3F6'])
-                fig.update_layout(
-                    annotations=[dict(text=f'{score}', x=0.5, y=0.5, font_size=40, showarrow=False)]
-                )
-                st.plotly_chart(fig)
+                # Display competitor strengths
+                st.subheader("Competitor Strengths")
+                st.write(f"**Headings Structure:** {competitor_analysis['headings']}")
+                st.write(f"**Tone:** {competitor_analysis['tone']}")
+                st.write(f"**Content Depth:** {competitor_analysis['depth']}")
+                st.write(f"**Keyword Relevance:** {competitor_analysis['keyword_relevance']}")
                 
-                # Display score breakdown
-                st.subheader("Score Breakdown")
-                breakdown_df = pd.DataFrame({
-                    'Category': score_breakdown.keys(),
-                    'Score': score_breakdown.values()
-                })
-                st.bar_chart(breakdown_df.set_index('Category'))
+                # Analyze user content
+                user_analysis = optimizer.analyze_competitor_content(user_content)
                 
-                # Display keyword frequency
-                st.subheader("Top Keywords in Your Content")
-                keyword_df = pd.DataFrame(
-                    {'Keyword': keyword_freq.keys(),
-                     'Frequency': keyword_freq.values()}
-                )
-                st.table(keyword_df)
+                # Display user weaknesses
+                st.subheader("User Content Weaknesses")
+                st.write(f"**Headings Structure:** {user_analysis['headings']}")
+                st.write(f"**Tone:** {user_analysis['tone']}")
+                st.write(f"**Content Depth:** {user_analysis['depth']}")
+                st.write(f"**Keyword Relevance:** {user_analysis['keyword_relevance']}")
                 
                 # Get semantic keyword suggestions
-                semantic_keywords = analyzer.get_semantic_keywords(content)
+                semantic_keywords = optimizer.get_semantic_keywords(user_content)
                 if semantic_keywords:
                     st.subheader("Semantic Keyword Suggestions")
                     st.write("Consider adding these related keywords to enhance your content:")
@@ -230,21 +196,13 @@ def main():
                         st.markdown(f"- {keyword}")
                     
                 # Get competitor URLs from Google SERP
-                if target_keywords.strip():
-                    competitor_urls = analyzer.get_competitor_urls_from_serp(target_keywords)
+                if target_keyword.strip():
+                    competitor_urls = optimizer.get_competitor_urls_from_serp(target_keyword)
                     
                     if competitor_urls:
                         st.subheader("Suggested Keywords from Competitors")
-                        competitor_keywords, _ = analyzer.analyze_competitor_content(competitor_urls)
-                        current_keywords = set(keyword_freq.keys())
-                        missing_keywords = set(competitor_keywords) - current_keywords
-                        
-                        if missing_keywords:
-                            st.write("Consider adding these keywords to your content:")
-                            for keyword in missing_keywords:
-                                st.markdown(f"- {keyword}")
-                        else:
-                            st.write("Great job! Your content covers most important keywords.")
+                        for url in competitor_urls:
+                            st.write(url)
                     
             except Exception as e:
                 st.error(f"An error occurred during analysis: {str(e)}")
