@@ -4,11 +4,12 @@ from bs4 import BeautifulSoup
 import nltk
 from nltk.corpus import wordnet as wn
 import re
+import os  # Added missing import
 from urllib.parse import quote_plus
 import time
 
 # Set NLTK data path to a writable directory
-nltk_data_dir = os.path.join(os.getcwd(), 'nltk_data')
+nltk_data_dir = os.path.join(os.getcwd(), 'nltk_data')  # Now works with the os module
 if not os.path.exists(nltk_data_dir):
     os.makedirs(nltk_data_dir)
 nltk.data.path.insert(0, nltk_data_dir)
