@@ -6,13 +6,13 @@ import plotly.express as px
 from collections import Counter
 import re
 from sklearn.feature_extraction.text import TfidfVectorizer
-import subprocess
-import sys
+import spacy
+import nltk
 
-# Install NLTK and download required data
+# Initialize NLTK
+@st.cache_resource
 def setup_nltk():
     try:
-        import nltk
         nltk.download('punkt')
         nltk.download('stopwords')
         nltk.download('averaged_perceptron_tagger')
@@ -21,31 +21,24 @@ def setup_nltk():
         st.error(f"Error setting up NLTK: {str(e)}")
         return None
 
-# Install spaCy and download model
-def setup_spacy():
+# Initialize spaCy
+@st.cache_resource
+def load_spacy():
     try:
-        import spacy
-        try:
-            nlp = spacy.load('en_core_web_sm')
-        except OSError:
-            subprocess.check_call([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
-            nlp = spacy.load('en_core_web_sm')
-        return nlp
+        return spacy.load('en_core_web_sm')
     except Exception as e:
-        st.error(f"Error setting up spaCy: {str(e)}")
+        st.error(f"Error loading spaCy model: {str(e)}")
         return None
 
-# Initialize NLP components
-@st.cache_resource
-def initialize_nlp():
-    nltk = setup_nltk()
-    nlp = setup_spacy()
-    return nltk, nlp
-
 class SEOAnalyzer:
-    def __init__(self, nltk, nlp):
-        self.nltk = nltk
+    def __init__(self, nltk_instance=None, nlp=None):
+        self.nltk = nltk_instance
         self.nlp = nlp
+        
+    def analyze_text(self, text):
+        """Basic text analysis without requiring NLP models"""
+        words = text.lower().split()
+        return words
         
     def analyze_competitor_content(self, urls):
         all_text = []
@@ -58,22 +51,23 @@ class SEOAnalyzer:
                     soup = BeautifulSoup(response.text, 'html.parser')
                     text = ' '.join([p.text for p in soup.find_all('p')])
                     all_text.append(text)
-                except:
+                except Exception as e:
+                    st.warning(f"Couldn't analyze {url}: {str(e)}")
                     continue
             
             if not all_text:
                 return [], []
                 
-            vectorizer = TfidfVectorizer(max_features=50, stop_words='english')
-            tfidf_matrix = vectorizer.fit_transform(all_text)
-            feature_names = vectorizer.get_feature_names_out()
-            
-            return feature_names, all_text
+            try:
+                vectorizer = TfidfVectorizer(max_features=50, stop_words='english')
+                tfidf_matrix = vectorizer.fit_transform(all_text)
+                feature_names = vectorizer.get_feature_names_out()
+                return feature_names, all_text
+            except Exception as e:
+                st.error(f"Error in keyword extraction: {str(e)}")
+                return [], all_text
     
     def calculate_content_score(self, content, competitor_keywords):
-        if not self.nltk:
-            return 0, {'error': 'NLTK not available'}
-            
         score_breakdown = {
             'length': 0,
             'keyword_usage': 0,
@@ -91,7 +85,12 @@ class SEOAnalyzer:
             
         # Keyword usage score
         if competitor_keywords:
-            content_words = set(self.nltk.word_tokenize(content.lower()))
+            # Fallback to basic tokenization if NLTK is not available
+            if self.nltk:
+                content_words = set(self.nltk.word_tokenize(content.lower()))
+            else:
+                content_words = set(content.lower().split())
+            
             keyword_matches = content_words.intersection(set(competitor_keywords))
             score_breakdown['keyword_usage'] = int((len(keyword_matches) / len(competitor_keywords)) * 40)
         
@@ -113,15 +112,17 @@ def main():
     
     st.title("SEO Content Analyzer")
     
-    # Initialize NLP components
-    nltk, nlp = initialize_nlp()
+    # Initialize NLP components with fallback
+    nltk_instance = setup_nltk()
+    nlp = load_spacy()
     
-    if not nltk or not nlp:
-        st.error("Failed to initialize required NLP components. Please check the logs.")
-        return
+    if not nltk_instance:
+        st.warning("NLTK initialization failed. Some features may be limited.")
+    if not nlp:
+        st.warning("spaCy initialization failed. Some features may be limited.")
     
     # Initialize analyzer
-    analyzer = SEOAnalyzer(nltk, nlp)
+    analyzer = SEOAnalyzer(nltk_instance, nlp)
     
     # Create two columns
     col1, col2 = st.columns([6, 4])
@@ -161,29 +162,31 @@ def main():
                 
                 # Display score breakdown
                 st.subheader("Score Breakdown")
-                if 'error' not in score_breakdown:
-                    breakdown_df = pd.DataFrame({
-                        'Category': score_breakdown.keys(),
-                        'Score': score_breakdown.values()
-                    })
-                    st.bar_chart(breakdown_df.set_index('Category'))
+                breakdown_df = pd.DataFrame({
+                    'Category': score_breakdown.keys(),
+                    'Score': score_breakdown.values()
+                })
+                st.bar_chart(breakdown_df.set_index('Category'))
                 
-                    # Display keyword suggestions
-                    st.subheader("Keyword Suggestions")
-                    if competitor_keywords:
-                        content_words = set(nltk.word_tokenize(content.lower()))
-                        missing_keywords = set(competitor_keywords) - content_words
-                        
-                        if missing_keywords:
-                            st.write("Consider adding these keywords to your content:")
-                            for keyword in missing_keywords:
-                                st.markdown(f"- {keyword}")
-                        else:
-                            st.write("Great job! Your content covers most important keywords.")
+                # Display keyword suggestions
+                st.subheader("Keyword Suggestions")
+                if competitor_keywords:
+                    # Use basic tokenization if NLTK is not available
+                    if nltk_instance:
+                        content_words = set(nltk_instance.word_tokenize(content.lower()))
                     else:
-                        st.warning("No competitor keywords found. Please check the URLs provided.")
+                        content_words = set(content.lower().split())
+                        
+                    missing_keywords = set(competitor_keywords) - content_words
+                    
+                    if missing_keywords:
+                        st.write("Consider adding these keywords to your content:")
+                        for keyword in missing_keywords:
+                            st.markdown(f"- {keyword}")
+                    else:
+                        st.write("Great job! Your content covers most important keywords.")
                 else:
-                    st.error("Error in analysis. Please try again.")
+                    st.warning("No competitor keywords found. Please check the URLs provided.")
                     
             except Exception as e:
                 st.error(f"An error occurred during analysis: {str(e)}")
