@@ -1,14 +1,9 @@
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
-import pandas as pd
-import plotly.express as px
-from collections import Counter
-import re
-from sklearn.feature_extraction.text import TfidfVectorizer
 import nltk
-import os
 from nltk.corpus import wordnet as wn
+import re
 from urllib.parse import quote_plus
 import time
 
@@ -36,53 +31,35 @@ def setup_nltk():
 
 class ContentOptimizer:
     def __init__(self):
-        # Basic tokenization without relying on NLTK initially
-        self.stop_words = set(['a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 
-                             'has', 'he', 'in', 'is', 'it', 'its', 'of', 'on', 'that', 'the', 
-                             'to', 'was', 'were', 'will', 'with'])
-    
+        self.stop_words = set(nltk.corpus.stopwords.words('english'))
+
     def tokenize_text(self, text):
-        """Simple tokenization fallback"""
-        # Remove punctuation and convert to lowercase
-        text = re.sub(r'[^\w\s]', '', text.lower())
-        # Split into words
+        """ Simple tokenization without punctuation """
+        text = re.sub(r'[^\w\s]', '', text.lower())  # Remove punctuation
         return text.split()
 
-    def analyze_competitor_content(self, content):
-        """ Analyze competitor content based on structure, tone, depth, and keywords """
-        # Return a structured analysis
-        analysis = {
-            'headings': self.extract_headings(content),
-            'tone': self.analyze_tone(content),
-            'depth': self.analyze_depth(content),
-            'keyword_relevance': self.analyze_keywords(content)
-        }
-        return analysis
-    
-    def extract_headings(self, content):
-        """ Extract and analyze headings and subheadings """
+    def analyze_content_structure(self, content):
+        """ Analyze headings and subheadings structure """
         headings = re.findall(r'(^|\n)[#]{1,6}\s*(.*?)\s*(?=\n|$)', content)
         return headings
-    
+
     def analyze_tone(self, content):
-        """ Simple tone analysis based on keyword matching """
+        """ Analyze tone based on keyword matching """
         tone_keywords = {
             'professional': ['research', 'analysis', 'methodology'],
             'conversational': ['you', 'we', 'let\'s', 'try'],
             'promotional': ['buy', 'discount', 'offers']
         }
-        
+
         tone_scores = {'professional': 0, 'conversational': 0, 'promotional': 0}
-        
         for tone, keywords in tone_keywords.items():
             tone_scores[tone] = sum([content.lower().count(keyword) for keyword in keywords])
-        
-        # Determine dominant tone
+
         dominant_tone = max(tone_scores, key=tone_scores.get)
         return dominant_tone
-    
+
     def analyze_depth(self, content):
-        """ Measure content depth based on sentence length and complexity """
+        """ Measure content depth by sentence length """
         sentences = [s.strip() for s in content.split('.') if s.strip()]
         avg_sentence_length = sum(len(s.split()) for s in sentences) / len(sentences)
         if avg_sentence_length > 20:
@@ -92,18 +69,16 @@ class ContentOptimizer:
         else:
             return "Low"
 
-    def analyze_keywords(self, content):
-        """ Check keyword usage and integration """
-        keywords = ['qualifying r&d expenditure', 'tax relief', 'government incentives']  # Example keywords
-        keyword_count = {keyword: content.lower().count(keyword) for keyword in keywords}
+    def analyze_keywords(self, content, target_keywords):
+        """ Check keyword usage in content """
+        keyword_count = {keyword: content.lower().count(keyword) for keyword in target_keywords}
         return keyword_count
-    
+
     def get_semantic_keywords(self, text):
-        """ Generate related words using synonyms from WordNet """
+        """ Generate related words using WordNet """
         words = self.tokenize_text(text)
         related_keywords = set()
-        
-        # Generate synonyms using WordNet
+
         for word in words:
             if word not in self.stop_words:
                 synonyms = set()
@@ -111,22 +86,22 @@ class ContentOptimizer:
                     for lemma in syn.lemmas():
                         synonyms.add(lemma.name())
                 related_keywords.update(synonyms)
-        
-        # Limit the number of keywords to 10
+
+        # Limit to 10 semantic keywords
         return list(related_keywords)[:10]
 
     def get_competitor_urls_from_serp(self, keyword):
-        """ Scrape Google SERP for the top 5 competitor URLs based on the keyword """
+        """ Scrape Google SERP for top competitor URLs based on keyword """
         headers = {'User-Agent': 'Mozilla/5.0'}
         query = quote_plus(keyword)
         search_url = f'https://www.google.com/search?q={query}'
-        
+
         try:
             response = requests.get(search_url, headers=headers, timeout=5)
             soup = BeautifulSoup(response.text, 'html.parser')
             links = [a['href'] for a in soup.find_all('a', href=True)]
-            
-            # Filter out URLs and limit to top 5
+
+            # Filter URLs
             competitor_urls = []
             for link in links:
                 if link.startswith('/url?q='):
@@ -139,71 +114,80 @@ class ContentOptimizer:
             return []
 
 def main():
-    st.set_page_config(page_title="Content Analysis & Optimization", layout="wide")
-    
-    st.title("Content Analysis & Optimization Tool for Featured Snippet Success")
-    
-    # Initialize NLTK (but don't block if it fails)
+    st.set_page_config(page_title="Content Optimization for Featured Snippets", layout="wide")
+
+    st.title("Content Optimization for Featured Snippet Success")
+
+    # Initialize NLTK
     setup_nltk()
-    
-    # Initialize analyzer
+
+    # Initialize optimizer
     optimizer = ContentOptimizer()
-    
+
     # Create two columns for competitor and user content
     col1, col2 = st.columns([6, 4])
-    
+
     with col1:
         st.subheader("Competitor Content (Featured Snippet Holder)")
         competitor_content = st.text_area("Enter the competitor's content here:", height=400)
-        
+
         st.subheader("User Content (Your Content)")
         user_content = st.text_area("Enter your content here:", height=400)
-        
+
         target_keyword = st.text_input("Enter target keyword:")
         analyze_button = st.button("Analyze Content")
-        
+
     with col2:
         st.subheader("Analysis Results")
-        
+
         if analyze_button and competitor_content and user_content:
             try:
                 # Analyze competitor content
-                competitor_analysis = optimizer.analyze_competitor_content(competitor_content)
-                
-                # Display competitor strengths
-                st.subheader("Competitor Strengths")
-                st.write(f"**Headings Structure:** {competitor_analysis['headings']}")
-                st.write(f"**Tone:** {competitor_analysis['tone']}")
-                st.write(f"**Content Depth:** {competitor_analysis['depth']}")
-                st.write(f"**Keyword Relevance:** {competitor_analysis['keyword_relevance']}")
-                
+                competitor_headings = optimizer.analyze_content_structure(competitor_content)
+                competitor_tone = optimizer.analyze_tone(competitor_content)
+                competitor_depth = optimizer.analyze_depth(competitor_content)
+                competitor_keywords = optimizer.analyze_keywords(competitor_content, [target_keyword])
+
+                st.write(f"**Competitor Headings Structure:** {competitor_headings}")
+                st.write(f"**Competitor Tone:** {competitor_tone}")
+                st.write(f"**Competitor Content Depth:** {competitor_depth}")
+                st.write(f"**Competitor Keyword Relevance:** {competitor_keywords}")
+
                 # Analyze user content
-                user_analysis = optimizer.analyze_competitor_content(user_content)
-                
-                # Display user weaknesses
-                st.subheader("User Content Weaknesses")
-                st.write(f"**Headings Structure:** {user_analysis['headings']}")
-                st.write(f"**Tone:** {user_analysis['tone']}")
-                st.write(f"**Content Depth:** {user_analysis['depth']}")
-                st.write(f"**Keyword Relevance:** {user_analysis['keyword_relevance']}")
-                
+                user_headings = optimizer.analyze_content_structure(user_content)
+                user_tone = optimizer.analyze_tone(user_content)
+                user_depth = optimizer.analyze_depth(user_content)
+                user_keywords = optimizer.analyze_keywords(user_content, [target_keyword])
+
+                st.write(f"**User Headings Structure:** {user_headings}")
+                st.write(f"**User Tone:** {user_tone}")
+                st.write(f"**User Content Depth:** {user_depth}")
+                st.write(f"**User Keyword Relevance:** {user_keywords}")
+
                 # Get semantic keyword suggestions
                 semantic_keywords = optimizer.get_semantic_keywords(user_content)
                 if semantic_keywords:
                     st.subheader("Semantic Keyword Suggestions")
-                    st.write("Consider adding these related keywords to enhance your content:")
                     for keyword in semantic_keywords:
                         st.markdown(f"- {keyword}")
-                    
+
                 # Get competitor URLs from Google SERP
                 if target_keyword.strip():
                     competitor_urls = optimizer.get_competitor_urls_from_serp(target_keyword)
-                    
+
                     if competitor_urls:
-                        st.subheader("Suggested Keywords from Competitors")
+                        st.subheader("Suggested Competitor URLs for Further Analysis")
                         for url in competitor_urls:
                             st.write(url)
-                    
+
+                # Actionable recommendations
+                st.subheader("Actionable Recommendations")
+                st.write("1. Improve heading structure with clear H2 and H3 tags.")
+                st.write("2. Enhance keyword optimization, including related keywords and semantic terms.")
+                st.write("3. Add detailed examples or case studies to improve content depth.")
+                st.write("4. Update content with the latest data and industry trends.")
+                st.write("5. Focus on concise, engaging language for better readability.")
+
             except Exception as e:
                 st.error(f"An error occurred during analysis: {str(e)}")
                 st.info("Please check your input and try again.")
