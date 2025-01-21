@@ -7,8 +7,8 @@ from collections import Counter
 import re
 from sklearn.feature_extraction.text import TfidfVectorizer
 import nltk
-import spacy
 import os
+from nltk.corpus import wordnet as wn
 
 # Set NLTK data path to a writable directory
 nltk_data_dir = os.path.join(os.getcwd(), 'nltk_data')
@@ -21,7 +21,7 @@ nltk.data.path.insert(0, nltk_data_dir)
 def setup_nltk():
     try:
         # Download required NLTK data
-        for resource in ['punkt', 'stopwords', 'averaged_perceptron_tagger']:
+        for resource in ['punkt', 'stopwords', 'averaged_perceptron_tagger', 'wordnet']:
             try:
                 nltk.download(resource, download_dir=nltk_data_dir, quiet=True)
             except Exception as e:
@@ -31,9 +31,6 @@ def setup_nltk():
     except Exception as e:
         st.error(f"Error setting up NLTK: {str(e)}")
         return False
-
-# Load spaCy's English model for semantic analysis
-nlp = spacy.load('en_core_web_md')  # You may need to install it with 'pip install spacy' and 'python -m spacy download en_core_web_md'
 
 class SEOAnalyzer:
     def __init__(self):
@@ -128,18 +125,18 @@ class SEOAnalyzer:
         return sum(score_breakdown.values()), score_breakdown, dict(word_freq.most_common(10))
 
     def get_semantic_keywords(self, text):
-        doc = nlp(text)
+        """ Generate related words using synonyms from WordNet """
+        words = self.tokenize_text(text)
         related_keywords = set()
         
-        # Extract entities and related terms (synonyms, hypernyms, etc.)
-        for token in doc:
-            if token.pos_ in ['NOUN', 'ADJ', 'VERB'] and not token.is_stop:
-                related_keywords.add(token.lemma_)
-        
-        # Use spaCy's word vectors to find similar terms
-        for word in related_keywords:
-            similar_words = nlp.vocab[word].similarity
-            related_keywords.update([similar_word for similar_word in similar_words])
+        # Generate synonyms using WordNet
+        for word in words:
+            if word not in self.stop_words:
+                synonyms = set()
+                for syn in wn.synsets(word):
+                    for lemma in syn.lemmas():
+                        synonyms.add(lemma.name())
+                related_keywords.update(synonyms)
         
         return list(related_keywords)
 
