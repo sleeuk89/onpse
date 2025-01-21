@@ -7,6 +7,7 @@ from collections import Counter
 import re
 from sklearn.feature_extraction.text import TfidfVectorizer
 import nltk
+import spacy
 import os
 
 # Set NLTK data path to a writable directory
@@ -30,6 +31,9 @@ def setup_nltk():
     except Exception as e:
         st.error(f"Error setting up NLTK: {str(e)}")
         return False
+
+# Load spaCy's English model for semantic analysis
+nlp = spacy.load('en_core_web_md')  # You may need to install it with 'pip install spacy' and 'python -m spacy download en_core_web_md'
 
 class SEOAnalyzer:
     def __init__(self):
@@ -120,8 +124,25 @@ class SEOAnalyzer:
         good_density_keywords = sum(1 for density in keyword_densities.values() 
                                  if 1 <= density <= 3)
         score_breakdown['keyword_density'] = min(30, good_density_keywords * 3)
-            
+        
         return sum(score_breakdown.values()), score_breakdown, dict(word_freq.most_common(10))
+
+    def get_semantic_keywords(self, text):
+        doc = nlp(text)
+        related_keywords = set()
+        
+        # Extract entities and related terms (synonyms, hypernyms, etc.)
+        for token in doc:
+            if token.pos_ in ['NOUN', 'ADJ', 'VERB'] and not token.is_stop:
+                related_keywords.add(token.lemma_)
+        
+        # Use spaCy's word vectors to find similar terms
+        for word in related_keywords:
+            similar_words = nlp.vocab[word].similarity
+            related_keywords.update([similar_word for similar_word in similar_words])
+        
+        return list(related_keywords)
+
 
 def main():
     st.set_page_config(page_title="SEO Content Analyzer", layout="wide")
@@ -180,6 +201,14 @@ def main():
                 )
                 st.table(keyword_df)
                 
+                # Get semantic keyword suggestions
+                semantic_keywords = analyzer.get_semantic_keywords(content)
+                if semantic_keywords:
+                    st.subheader("Semantic Keyword Suggestions")
+                    st.write("Consider adding these related keywords to enhance your content:")
+                    for keyword in semantic_keywords:
+                        st.markdown(f"- {keyword}")
+                    
                 # Analyze competitor content if URLs provided
                 if competitor_urls.strip():
                     urls = [url.strip() for url in competitor_urls.split('\n') if url.strip()]
