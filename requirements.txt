@@ -1,0 +1,8 @@
+streamlit
+nltk
+spacy
+scikit-learn
+beautifulsoup4
+plotly
+pandas
+requests
