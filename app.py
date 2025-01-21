@@ -7,16 +7,25 @@ from collections import Counter
 import re
 from sklearn.feature_extraction.text import TfidfVectorizer
 import nltk
-from nltk.tokenize import word_tokenize, sent_tokenize
-from nltk.corpus import stopwords
+import os
+
+# Set NLTK data path to a writable directory
+nltk_data_dir = os.path.join(os.getcwd(), 'nltk_data')
+if not os.path.exists(nltk_data_dir):
+    os.makedirs(nltk_data_dir)
+nltk.data.path.insert(0, nltk_data_dir)
 
 # Initialize NLTK
 @st.cache_resource
 def setup_nltk():
     try:
-        nltk.download('punkt')
-        nltk.download('stopwords')
-        nltk.download('averaged_perceptron_tagger')
+        # Download required NLTK data
+        for resource in ['punkt', 'stopwords', 'averaged_perceptron_tagger']:
+            try:
+                nltk.download(resource, download_dir=nltk_data_dir, quiet=True)
+            except Exception as e:
+                st.error(f"Error downloading {resource}: {str(e)}")
+                return False
         return True
     except Exception as e:
         st.error(f"Error setting up NLTK: {str(e)}")
@@ -24,20 +33,18 @@ def setup_nltk():
 
 class SEOAnalyzer:
     def __init__(self):
-        self.stop_words = set(stopwords.words('english'))
-        
-    def preprocess_text(self, text):
-        """Basic text preprocessing"""
-        # Convert to lowercase
-        text = text.lower()
-        # Remove special characters and digits
-        text = re.sub(r'[^a-zA-Z\s]', '', text)
-        # Tokenize
-        tokens = word_tokenize(text)
-        # Remove stopwords
-        tokens = [t for t in tokens if t not in self.stop_words]
-        return tokens
-        
+        # Basic tokenization without relying on NLTK initially
+        self.stop_words = set(['a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 
+                             'has', 'he', 'in', 'is', 'it', 'its', 'of', 'on', 'that', 'the', 
+                             'to', 'was', 'were', 'will', 'with'])
+    
+    def tokenize_text(self, text):
+        """Simple tokenization fallback"""
+        # Remove punctuation and convert to lowercase
+        text = re.sub(r'[^\w\s]', '', text.lower())
+        # Split into words
+        return text.split()
+    
     def analyze_competitor_content(self, urls):
         all_text = []
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -60,7 +67,7 @@ class SEOAnalyzer:
                 vectorizer = TfidfVectorizer(
                     max_features=50,
                     stop_words='english',
-                    ngram_range=(1, 2)  # Include bigrams
+                    ngram_range=(1, 2)
                 )
                 tfidf_matrix = vectorizer.fit_transform(all_text)
                 feature_names = vectorizer.get_feature_names_out()
@@ -76,8 +83,10 @@ class SEOAnalyzer:
             'keyword_density': 0
         }
         
+        # Tokenize text
+        words = self.tokenize_text(content)
+        
         # Length score (30 points max)
-        words = word_tokenize(content)
         if len(words) >= 1000:
             score_breakdown['length'] = 30
         elif len(words) >= 500:
@@ -86,34 +95,31 @@ class SEOAnalyzer:
             score_breakdown['length'] = 10
         
         # Readability score (40 points max)
-        try:
-            sentences = sent_tokenize(content)
-            avg_sentence_length = len(words) / len(sentences) if sentences else 0
-            if avg_sentence_length <= 20:
-                score_breakdown['readability'] = 40
-            elif avg_sentence_length <= 25:
-                score_breakdown['readability'] = 30
-            else:
-                score_breakdown['readability'] = 20
-        except:
+        sentences = [s.strip() for s in content.split('.') if s.strip()]
+        avg_sentence_length = len(words) / len(sentences) if sentences else 0
+        if avg_sentence_length <= 20:
+            score_breakdown['readability'] = 40
+        elif avg_sentence_length <= 25:
+            score_breakdown['readability'] = 30
+        else:
             score_breakdown['readability'] = 20
         
         # Keyword density score (30 points max)
-        try:
-            tokens = self.preprocess_text(content)
-            word_freq = Counter(tokens)
-            total_words = len(tokens)
-            
-            # Calculate keyword density
-            keyword_densities = {word: (count/total_words)*100 
-                               for word, count in word_freq.most_common(10)}
-            
-            # Score based on keyword density (ideal: 1-3%)
-            good_density_keywords = sum(1 for density in keyword_densities.values() 
-                                     if 1 <= density <= 3)
-            score_breakdown['keyword_density'] = min(30, good_density_keywords * 3)
-        except:
-            score_breakdown['keyword_density'] = 0
+        word_freq = Counter(words)
+        total_words = len(words)
+        
+        # Remove stop words from frequency count
+        word_freq = Counter({word: count for word, count in word_freq.items() 
+                           if word not in self.stop_words and len(word) > 2})
+        
+        # Calculate keyword density
+        keyword_densities = {word: (count/total_words)*100 
+                           for word, count in word_freq.most_common(10)}
+        
+        # Score based on keyword density (ideal: 1-3%)
+        good_density_keywords = sum(1 for density in keyword_densities.values() 
+                                 if 1 <= density <= 3)
+        score_breakdown['keyword_density'] = min(30, good_density_keywords * 3)
             
         return sum(score_breakdown.values()), score_breakdown, dict(word_freq.most_common(10))
 
@@ -122,10 +128,8 @@ def main():
     
     st.title("SEO Content Analyzer")
     
-    # Initialize NLTK
-    if not setup_nltk():
-        st.error("Failed to initialize NLTK. Please try again.")
-        return
+    # Initialize NLTK (but don't block if it fails)
+    setup_nltk()
     
     # Initialize analyzer
     analyzer = SEOAnalyzer()
