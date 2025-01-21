@@ -6,8 +6,9 @@ import plotly.express as px
 from collections import Counter
 import re
 from sklearn.feature_extraction.text import TfidfVectorizer
-import spacy
 import nltk
+from nltk.tokenize import word_tokenize, sent_tokenize
+from nltk.corpus import stopwords
 
 # Initialize NLTK
 @st.cache_resource
@@ -16,29 +17,26 @@ def setup_nltk():
         nltk.download('punkt')
         nltk.download('stopwords')
         nltk.download('averaged_perceptron_tagger')
-        return nltk
+        return True
     except Exception as e:
         st.error(f"Error setting up NLTK: {str(e)}")
-        return None
-
-# Initialize spaCy
-@st.cache_resource
-def load_spacy():
-    try:
-        return spacy.load('en_core_web_sm')
-    except Exception as e:
-        st.error(f"Error loading spaCy model: {str(e)}")
-        return None
+        return False
 
 class SEOAnalyzer:
-    def __init__(self, nltk_instance=None, nlp=None):
-        self.nltk = nltk_instance
-        self.nlp = nlp
+    def __init__(self):
+        self.stop_words = set(stopwords.words('english'))
         
-    def analyze_text(self, text):
-        """Basic text analysis without requiring NLP models"""
-        words = text.lower().split()
-        return words
+    def preprocess_text(self, text):
+        """Basic text preprocessing"""
+        # Convert to lowercase
+        text = text.lower()
+        # Remove special characters and digits
+        text = re.sub(r'[^a-zA-Z\s]', '', text)
+        # Tokenize
+        tokens = word_tokenize(text)
+        # Remove stopwords
+        tokens = [t for t in tokens if t not in self.stop_words]
+        return tokens
         
     def analyze_competitor_content(self, urls):
         all_text = []
@@ -59,7 +57,11 @@ class SEOAnalyzer:
                 return [], []
                 
             try:
-                vectorizer = TfidfVectorizer(max_features=50, stop_words='english')
+                vectorizer = TfidfVectorizer(
+                    max_features=50,
+                    stop_words='english',
+                    ngram_range=(1, 2)  # Include bigrams
+                )
                 tfidf_matrix = vectorizer.fit_transform(all_text)
                 feature_names = vectorizer.get_feature_names_out()
                 return feature_names, all_text
@@ -67,62 +69,66 @@ class SEOAnalyzer:
                 st.error(f"Error in keyword extraction: {str(e)}")
                 return [], all_text
     
-    def calculate_content_score(self, content, competitor_keywords):
+    def calculate_content_score(self, content):
         score_breakdown = {
             'length': 0,
-            'keyword_usage': 0,
-            'readability': 0
+            'readability': 0,
+            'keyword_density': 0
         }
         
-        # Length score
-        words = content.split()
+        # Length score (30 points max)
+        words = word_tokenize(content)
         if len(words) >= 1000:
             score_breakdown['length'] = 30
         elif len(words) >= 500:
             score_breakdown['length'] = 20
         else:
             score_breakdown['length'] = 10
-            
-        # Keyword usage score
-        if competitor_keywords:
-            # Fallback to basic tokenization if NLTK is not available
-            if self.nltk:
-                content_words = set(self.nltk.word_tokenize(content.lower()))
-            else:
-                content_words = set(content.lower().split())
-            
-            keyword_matches = content_words.intersection(set(competitor_keywords))
-            score_breakdown['keyword_usage'] = int((len(keyword_matches) / len(competitor_keywords)) * 40)
         
-        # Readability score
-        sentences = [s for s in content.split('.') if s.strip()]
-        avg_sentence_length = len(words) / len(sentences) if sentences else 0
-        if avg_sentence_length <= 20:
-            score_breakdown['readability'] = 30
-        elif avg_sentence_length <= 25:
+        # Readability score (40 points max)
+        try:
+            sentences = sent_tokenize(content)
+            avg_sentence_length = len(words) / len(sentences) if sentences else 0
+            if avg_sentence_length <= 20:
+                score_breakdown['readability'] = 40
+            elif avg_sentence_length <= 25:
+                score_breakdown['readability'] = 30
+            else:
+                score_breakdown['readability'] = 20
+        except:
             score_breakdown['readability'] = 20
-        else:
-            score_breakdown['readability'] = 10
+        
+        # Keyword density score (30 points max)
+        try:
+            tokens = self.preprocess_text(content)
+            word_freq = Counter(tokens)
+            total_words = len(tokens)
             
-        total_score = sum(score_breakdown.values())
-        return total_score, score_breakdown
+            # Calculate keyword density
+            keyword_densities = {word: (count/total_words)*100 
+                               for word, count in word_freq.most_common(10)}
+            
+            # Score based on keyword density (ideal: 1-3%)
+            good_density_keywords = sum(1 for density in keyword_densities.values() 
+                                     if 1 <= density <= 3)
+            score_breakdown['keyword_density'] = min(30, good_density_keywords * 3)
+        except:
+            score_breakdown['keyword_density'] = 0
+            
+        return sum(score_breakdown.values()), score_breakdown, dict(word_freq.most_common(10))
 
 def main():
     st.set_page_config(page_title="SEO Content Analyzer", layout="wide")
     
     st.title("SEO Content Analyzer")
     
-    # Initialize NLP components with fallback
-    nltk_instance = setup_nltk()
-    nlp = load_spacy()
-    
-    if not nltk_instance:
-        st.warning("NLTK initialization failed. Some features may be limited.")
-    if not nlp:
-        st.warning("spaCy initialization failed. Some features may be limited.")
+    # Initialize NLTK
+    if not setup_nltk():
+        st.error("Failed to initialize NLTK. Please try again.")
+        return
     
     # Initialize analyzer
-    analyzer = SEOAnalyzer(nltk_instance, nlp)
+    analyzer = SEOAnalyzer()
     
     # Create two columns
     col1, col2 = st.columns([6, 4])
@@ -141,14 +147,8 @@ def main():
         
         if analyze_button and content:
             try:
-                # Process competitor URLs
-                urls = [url.strip() for url in competitor_urls.split('\n') if url.strip()]
-                
-                # Analyze competitor content
-                competitor_keywords, competitor_texts = analyzer.analyze_competitor_content(urls)
-                
-                # Calculate scores
-                score, score_breakdown = analyzer.calculate_content_score(content, competitor_keywords)
+                # Calculate content scores
+                score, score_breakdown, keyword_freq = analyzer.calculate_content_score(content)
                 
                 # Display score with gauge chart
                 fig = px.pie(values=[score, 100-score], 
@@ -168,25 +168,30 @@ def main():
                 })
                 st.bar_chart(breakdown_df.set_index('Category'))
                 
-                # Display keyword suggestions
-                st.subheader("Keyword Suggestions")
-                if competitor_keywords:
-                    # Use basic tokenization if NLTK is not available
-                    if nltk_instance:
-                        content_words = set(nltk_instance.word_tokenize(content.lower()))
-                    else:
-                        content_words = set(content.lower().split())
-                        
-                    missing_keywords = set(competitor_keywords) - content_words
+                # Display keyword frequency
+                st.subheader("Top Keywords in Your Content")
+                keyword_df = pd.DataFrame(
+                    {'Keyword': keyword_freq.keys(),
+                     'Frequency': keyword_freq.values()}
+                )
+                st.table(keyword_df)
+                
+                # Analyze competitor content if URLs provided
+                if competitor_urls.strip():
+                    urls = [url.strip() for url in competitor_urls.split('\n') if url.strip()]
+                    competitor_keywords, _ = analyzer.analyze_competitor_content(urls)
                     
-                    if missing_keywords:
-                        st.write("Consider adding these keywords to your content:")
-                        for keyword in missing_keywords:
-                            st.markdown(f"- {keyword}")
-                    else:
-                        st.write("Great job! Your content covers most important keywords.")
-                else:
-                    st.warning("No competitor keywords found. Please check the URLs provided.")
+                    if competitor_keywords:
+                        st.subheader("Suggested Keywords from Competitors")
+                        current_keywords = set(keyword_freq.keys())
+                        missing_keywords = set(competitor_keywords) - current_keywords
+                        
+                        if missing_keywords:
+                            st.write("Consider adding these keywords to your content:")
+                            for keyword in missing_keywords:
+                                st.markdown(f"- {keyword}")
+                        else:
+                            st.write("Great job! Your content covers most important keywords.")
                     
             except Exception as e:
                 st.error(f"An error occurred during analysis: {str(e)}")
