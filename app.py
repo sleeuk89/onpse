@@ -9,6 +9,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 import nltk
 import os
 from nltk.corpus import wordnet as wn
+from urllib.parse import quote_plus
+import time
 
 # Set NLTK data path to a writable directory
 nltk_data_dir = os.path.join(os.getcwd(), 'nltk_data')
@@ -138,8 +140,31 @@ class SEOAnalyzer:
                         synonyms.add(lemma.name())
                 related_keywords.update(synonyms)
         
-        return list(related_keywords)
+        # Limit the number of keywords to 10
+        return list(related_keywords)[:10]
 
+    def get_competitor_urls_from_serp(self, keyword):
+        """ Scrape Google SERP for the top 5 competitor URLs based on the keyword """
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        query = quote_plus(keyword)
+        search_url = f'https://www.google.com/search?q={query}'
+        
+        try:
+            response = requests.get(search_url, headers=headers, timeout=5)
+            soup = BeautifulSoup(response.text, 'html.parser')
+            links = [a['href'] for a in soup.find_all('a', href=True)]
+            
+            # Filter out URLs and limit to top 5
+            competitor_urls = []
+            for link in links:
+                if link.startswith('/url?q='):
+                    competitor_urls.append(link.split('/url?q=')[1].split('&')[0])
+                    if len(competitor_urls) == 5:
+                        break
+            return competitor_urls
+        except Exception as e:
+            st.error(f"Error fetching Google SERP: {str(e)}")
+            return []
 
 def main():
     st.set_page_config(page_title="SEO Content Analyzer", layout="wide")
@@ -160,8 +185,6 @@ def main():
         content = st.text_area("Enter your content here:", height=300)
         
         target_keywords = st.text_input("Enter target keywords (comma-separated):")
-        competitor_urls = st.text_area("Enter competitor URLs (one per line):", height=100)
-        
         analyze_button = st.button("Analyze Content")
         
     with col2:
@@ -206,13 +229,13 @@ def main():
                     for keyword in semantic_keywords:
                         st.markdown(f"- {keyword}")
                     
-                # Analyze competitor content if URLs provided
-                if competitor_urls.strip():
-                    urls = [url.strip() for url in competitor_urls.split('\n') if url.strip()]
-                    competitor_keywords, _ = analyzer.analyze_competitor_content(urls)
+                # Get competitor URLs from Google SERP
+                if target_keywords.strip():
+                    competitor_urls = analyzer.get_competitor_urls_from_serp(target_keywords)
                     
-                    if competitor_keywords:
+                    if competitor_urls:
                         st.subheader("Suggested Keywords from Competitors")
+                        competitor_keywords, _ = analyzer.analyze_competitor_content(competitor_urls)
                         current_keywords = set(keyword_freq.keys())
                         missing_keywords = set(competitor_keywords) - current_keywords
                         
